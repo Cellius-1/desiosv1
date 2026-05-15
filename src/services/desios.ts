@@ -523,7 +523,7 @@ export async function insertWasteEntry(params: {
   locationId: string
   itemName: string
   batchNumber: string
-  quantityPortions: number
+  quantityOunces: number
   reason: string
   notes: string
 }) {
@@ -539,7 +539,7 @@ export async function insertWasteEntry(params: {
     service_date: serviceDate,
     item_name: params.itemName,
     batch_number: params.batchNumber,
-    quantity_portions: params.quantityPortions,
+    quantity_portions: params.quantityOunces,
     reason: params.reason,
     notes: params.notes,
     logged_by: userId,

@@ -1133,6 +1133,92 @@ a:focus-visible {
   color: var(--ink);
 }
 
+.sopLinkButton,
+.sopPrimaryButton {
+  cursor: pointer;
+  border: 1px solid #bfd0e4;
+  border-radius: 999px;
+  background: #f5f8fd;
+  color: #21415f;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 12px;
+  align-self: flex-start;
+}
+
+.sopPrimaryButton {
+  margin-top: 8px;
+  min-height: 42px;
+}
+
+.sopOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+}
+
+.sopOverlayBackdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(8, 17, 30, 0.6);
+}
+
+.sopDrawer {
+  position: relative;
+  z-index: 1;
+  width: min(1100px, calc(100vw - 32px));
+  height: min(92vh, 980px);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+  background: #ffffff;
+  border: 1px solid #d8e1ec;
+  border-radius: 24px;
+  box-shadow: 0 28px 80px rgba(8, 17, 30, 0.28);
+  padding: 18px;
+}
+
+.sopDrawerHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.sopDrawerHeader h3 {
+  color: var(--ink);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 30px;
+}
+
+.sopDrawerActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sopOpenExternal {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sopDrawerFrame {
+  width: 100%;
+  border: 1px solid #d8e1ec;
+  border-radius: 18px;
+  background: #f8fbff;
+}
+
+.sopDrawerNote {
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
 .printReportView {
   display: none;
 }
@@ -1163,7 +1249,13 @@ a:focus-visible {
   .skipLink,
   .topBar,
   .alertBanner,
-  .panelGrid {
+  .panelGrid,
+  .coachBanner,
+  .sopOverlay {
+    display: none !important;
+  }
+
+  .mainSurface > :not(.printReportView) {
     display: none !important;
   }
 
@@ -1188,6 +1280,10 @@ a:focus-visible {
   .printReportView p {
     margin-bottom: 6px;
     color: #222222;
+  }
+
+  .printReportView .reportMeta {
+    display: none !important;
   }
 
   .dataTable th,

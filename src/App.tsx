@@ -21,6 +21,7 @@ import {
   type ComplianceReportRow,
 } from './services/desios'
 import { isSupabaseConfigured } from './lib/supabase'
+import SopViewer from './components/SopViewer'
 
 type ModuleKey = 'home' | 'checklists' | 'temps' | 'waste' | 'data' | 'profile'
 type ChecklistKey = 'opening' | 'midday' | 'closing'
@@ -43,6 +44,7 @@ type ChecklistTask = {
   max?: number
   subItems?: string[]
   requiresPhoto?: boolean
+  sopUrl?: string
 }
 
 type TempItem = {
@@ -53,7 +55,7 @@ type TempItem = {
 }
 
 const openingTasks: ChecklistTask[] = [
-  { title: 'Hand wash + PPE', description: 'Verify gloves, apron, and hygiene readiness.', kind: 'checkbox' },
+  { title: 'Hand wash + PPE', description: 'Verify gloves, apron, and hygiene readiness.', kind: 'checkbox', sopUrl: 'https://desi-sop.vercel.app/#07' },
   {
     title: 'Thermometer calibration',
     description: 'Target 32F plus/minus 2F with image proof.',
@@ -61,16 +63,18 @@ const openingTasks: ChecklistTask[] = [
     min: 30,
     max: 34,
     requiresPhoto: true,
+    sopUrl: 'https://desi-sop.vercel.app/#07',
   },
-  { title: 'Equipment verification', description: 'Confirm prep station and probe kits are ready.', kind: 'checkbox' },
-  { title: 'Cold storage pull + date check', description: 'Inspect labels and discard-by dates.', kind: 'checkbox' },
-  { title: 'Oven preheat + chicken load', description: 'Validate 400F preheat and initial batch load.', kind: 'checkbox' },
+  { title: 'Equipment verification', description: 'Confirm prep station and probe kits are ready.', kind: 'checkbox', sopUrl: 'https://desi-sop.vercel.app/#07' },
+  { title: 'Cold storage pull + date check', description: 'Inspect labels and discard-by dates.', kind: 'checkbox', sopUrl: 'https://desi-sop.vercel.app/#07' },
+  { title: 'Oven preheat + chicken load', description: 'Validate 400F preheat and initial batch load.', kind: 'checkbox', sopUrl: 'https://desi-sop.vercel.app/#07' },
   {
     title: 'Protein reheat (Keema + Chole)',
     description: 'Both proteins must be at or above 165F.',
     kind: 'dualNumeric',
     min: 165,
     requiresPhoto: true,
+    sopUrl: 'https://desi-sop.vercel.app/#07',
   },
   {
     title: 'Sauce reheat (BM + Palak)',
@@ -78,6 +82,7 @@ const openingTasks: ChecklistTask[] = [
     kind: 'dualNumeric',
     min: 165,
     requiresPhoto: true,
+    sopUrl: 'https://desi-sop.vercel.app/#07',
   },
   {
     title: 'Final verification',
@@ -90,6 +95,7 @@ const openingTasks: ChecklistTask[] = [
       'Opening stock minimum met',
       'Lead operator quality check passed',
     ],
+    sopUrl: 'https://desi-sop.vercel.app/#07',
   },
 ]
 
@@ -149,6 +155,7 @@ function App() {
   const [dataTab, setDataTab] = useState<DataTabKey>('forecast')
   const [tempHistoryRange, setTempHistoryRange] = useState<TempRangeKey>('7days')
   const [tempHistoryFilter, setTempHistoryFilter] = useState('All')
+  const [sopViewerUrl, setSopViewerUrl] = useState<string | null>(null)
 
   const [taskInput, setTaskInput] = useState('')
   const [taskDualInput, setTaskDualInput] = useState({ first: '', second: '' })
@@ -377,7 +384,7 @@ function App() {
     if (wasteEntries.length === 0) {
       return {
         title: 'Add waste entry (if any)',
-        detail: 'Record discarded portions so inventory and forecasting stay accurate.',
+        detail: 'Record discarded ounces so inventory and forecasting stay accurate.',
         module: 'waste' as ModuleKey,
         action: 'Open waste log',
       }
@@ -595,7 +602,7 @@ function App() {
         locationId: appUser.location_id,
         itemName: wasteItem,
         batchNumber: wasteBatch,
-        quantityPortions: qty,
+        quantityOunces: qty,
         reason: wasteReason,
         notes: wasteNotes,
       })
@@ -1087,6 +1094,11 @@ function App() {
                     <p className="muted">Current step</p>
                     <h4>{currentTask?.title ?? 'Opening complete'}</h4>
                     <p>{currentTask?.description ?? 'No pending opening tasks.'}</p>
+                    {currentTask?.sopUrl ? (
+                      <button className="ghostBtn" onClick={() => setSopViewerUrl(currentTask.sopUrl!)}>
+                        Learn more
+                      </button>
+                    ) : null}
                     {renderGuidedTaskInput()}
                   </div>
 
@@ -1207,7 +1219,7 @@ function App() {
                 <input className="fieldInput" value={wasteBatch} onChange={(event) => setWasteBatch(event.target.value)} placeholder="Batch id" />
               </div>
               <div className="fieldSplit">
-                <input className="fieldInput" value={wasteQty} onChange={(event) => setWasteQty(event.target.value)} placeholder="Quantity portions" />
+                <input className="fieldInput" value={wasteQty} onChange={(event) => setWasteQty(event.target.value)} placeholder="Quantity ounces" />
                 <select className="fieldInput" value={wasteReason} onChange={(event) => setWasteReason(event.target.value)}>
                   <option value="time_limit">Time Limit</option>
                   <option value="quality_fail">Quality Fail</option>
@@ -1226,7 +1238,7 @@ function App() {
                 {wasteEntries.map((entry, idx) => (
                   <div key={entry.item + idx} className="entryRow">
                     <span>{entry.item} · {entry.reason}</span>
-                    <strong>{entry.qty} portions</strong>
+                    <strong>{entry.qty} ounces</strong>
                   </div>
                 ))}
               </div>
@@ -1296,7 +1308,7 @@ function App() {
                     <thead>
                       <tr>
                         <th>Item</th>
-                        <th>Forecast Portions</th>
+                        <th>Forecast Ounces</th>
                         <th>Recommended Batches</th>
                       </tr>
                     </thead>
@@ -1359,7 +1371,7 @@ function App() {
                         <th>Date</th>
                         <th>Checklists Completed</th>
                         <th>Unresolved Critical</th>
-                        <th>Waste Portions</th>
+                        <th>Waste Ounces</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1450,6 +1462,10 @@ function App() {
             </tbody>
           </table>
         </section>
+
+        {sopViewerUrl ? (
+          <SopViewer url={sopViewerUrl} onClose={() => setSopViewerUrl(null)} />
+        ) : null}
       </main>
     </div>
   )
