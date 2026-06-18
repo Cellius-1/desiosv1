@@ -249,7 +249,7 @@ export async function logTemperatureEntry(params: {
   tempItemId: string
   reading: number
   isValid: boolean
-  proofFile: File
+  proofFile?: File | null
 }) {
   const serviceDate = new Date().toISOString().slice(0, 10)
   const session = await getSession()
@@ -278,15 +278,16 @@ export async function logTemperatureEntry(params: {
     throw tempLogError
   }
 
-  const fileExt = params.proofFile.name.split('.').pop() ?? 'jpg'
-  const filePath = `${params.locationId}/${serviceDate}/${crypto.randomUUID()}.${fileExt}`
-
-  const { error: uploadError } = await supabase.storage
-    .from('temp-proofs')
-    .upload(filePath, params.proofFile, { upsert: false })
-
-  if (uploadError) {
-    throw uploadError
+  let filePath: string | null = null
+  if (params.proofFile) {
+    const fileExt = params.proofFile.name.split('.').pop() ?? 'jpg'
+    filePath = `${params.locationId}/${serviceDate}/${crypto.randomUUID()}.${fileExt}`
+    const { error: uploadError } = await supabase.storage
+      .from('temp-proofs')
+      .upload(filePath, params.proofFile, { upsert: false })
+    if (uploadError) {
+      throw uploadError
+    }
   }
 
   const { error: entryError } = await supabase
@@ -499,6 +500,75 @@ export async function fetchComplianceReport(locationId: string, fromDate: string
   return Array.from(byDate.values()).sort((a, b) => a.service_date.localeCompare(b.service_date))
 }
 
+export type AdminStaffRow = {
+  userId: string
+  displayName: string
+  email: string
+  role: string
+  activeToday: boolean
+  checklistsCompleted: number
+  checklistsTotal: number
+  tasksCompletedToday: number
+  lastActiveAt: string | null
+}
+
+export async function fetchAdminDashboard(locationId: string): Promise<AdminStaffRow[]> {
+  const serviceDate = new Date().toISOString().slice(0, 10)
+
+  const { data: users, error: usersError } = await supabase
+    .from('users')
+    .select('id,display_name,email,role')
+    .eq('location_id', locationId)
+
+  if (usersError) {
+    throw usersError
+  }
+
+  const { data: completions, error: completionsError } = await supabase
+    .from('checklist_completions')
+    .select('id,completed_by,status,started_at')
+    .eq('location_id', locationId)
+    .eq('service_date', serviceDate)
+
+  if (completionsError) {
+    throw completionsError
+  }
+
+  const completionIds = (completions ?? []).map((c) => c.id)
+
+  const taskRows = completionIds.length > 0
+    ? await supabase
+        .from('task_completions')
+        .select('completed_by,completed_at')
+        .in('checklist_completion_id', completionIds)
+    : { data: [], error: null }
+
+  if (taskRows.error) {
+    throw taskRows.error
+  }
+
+  return (users ?? []).map((user) => {
+    const userCompletions = (completions ?? []).filter((c) => c.completed_by === user.id)
+    const userTasks = (taskRows.data ?? []).filter((t) => t.completed_by === user.id)
+    const allTimes = [
+      ...userCompletions.map((c) => c.started_at),
+      ...userTasks.map((t) => t.completed_at),
+    ].filter(Boolean).sort().reverse()
+
+    return {
+      userId: user.id,
+      displayName: user.display_name,
+      email: user.email,
+      role: user.role,
+      activeToday: userCompletions.length > 0 || userTasks.length > 0,
+      checklistsCompleted: userCompletions.filter((c) => c.status === 'completed').length,
+      checklistsTotal: userCompletions.length,
+      tasksCompletedToday: userTasks.length,
+      lastActiveAt: allTimes[0] ?? null,
+    }
+  })
+}
+
 export function toCsv(rows: Record<string, string | number>[]) {
   if (rows.length === 0) {
     return ''
@@ -522,7 +592,7 @@ export function toCsv(rows: Record<string, string | number>[]) {
 export async function insertWasteEntry(params: {
   locationId: string
   itemName: string
-  batchNumber: string
+  batchNumber?: string
   quantityOunces: number
   reason: string
   notes: string
