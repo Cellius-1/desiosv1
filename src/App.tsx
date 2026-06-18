@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import heroImg from './assets/hero.png'
 import {
-  ensureChecklistCompletion,
   evaluateAlerts,
   fetchAdminDashboard,
   fetchComplianceReport,
@@ -12,13 +11,10 @@ import {
   loadTempItemIdMap,
   logTemperatureEntry,
   onAuthChange,
-  setChecklistCompletionStatus,
-  setTempLogStatus,
   signIn,
   signOut,
   subscribeToAlerts,
   toCsv,
-  upsertTaskCompletion,
   type AdminStaffRow,
   type AppUser,
   type ComplianceReportRow,
@@ -30,7 +26,6 @@ type ModuleKey = 'home' | 'checklists' | 'temps' | 'waste' | 'data' | 'profile' 
 type ChecklistKey = 'opening' | 'midday' | 'closing'
 type TaskKind = 'checkbox' | 'numeric' | 'dualNumeric' | 'multi'
 type DataTabKey = 'import' | 'reports'
-type TempRangeKey = 'today' | '7days' | '30days' | 'all'
 
 type DraftConflict = {
   openingDelta: number
@@ -390,16 +385,6 @@ const tempItems: TempItem[] = [
   { name: 'Freezer',                   displayName: 'Freezer',       type: 'cold', max: 0,   frequency: 'Daily',         section: 'cold' },
 ]
 
-const yieldsByItem: Record<string, number> = {
-  'Butter Chicken': 35,
-  Keema: 35,
-  Chole: 40,
-  'Butter Masala': 30,
-  'Palak Sauce': 35,
-  Paneer: 40,
-}
-
-const tempItemGroups =['All', 'Freezer', 'Hot Hold - Keema', 'Hot Hold - Chicken', 'Hot Hold - Chole', 'Hot Hold - Paneer', 'Sauce Pan #1', 'Sauce Pan #2']
 
 function App() {
   const [appUser, setAppUser] = useState<AppUser | null>(null)
@@ -426,27 +411,20 @@ function App() {
   const [activeChecklist, setActiveChecklist] = useState<ChecklistKey>('opening')
   const [openingCompleted, setOpeningCompleted] = useState(0)
   const [criticalAlerts, setCriticalAlerts] = useState<string[]>([])
-  const [openingChecklistCompletionId, setOpeningChecklistCompletionId] = useState<string | null>(null)
-  const [activeTempLogId, setActiveTempLogId] = useState<string | null>(null)
   const [tempItemIdMap, setTempItemIdMap] = useState<Map<string, string>>(new Map())
   const [dataTab, setDataTab] = useState<DataTabKey>('import')
   const [parsedSalesData, setParsedSalesData] = useState<ParsedSalesMix | null>(null)
   const [salesImportError, setSalesImportError] = useState('')
-  const [tempHistoryRange, setTempHistoryRange] = useState<TempRangeKey>('7days')
-  const [tempHistoryFilter, setTempHistoryFilter] = useState('All')
   const [sopViewerUrl, setSopViewerUrl] = useState<string | null>(null)
 
   const [taskInput, setTaskInput] = useState('')
   const [taskDualInput, setTaskDualInput] = useState({ first: '', second: '' })
   const [taskMultiInput, setTaskMultiInput] = useState<Record<string, boolean>>({})
-  const [taskProofAttached, setTaskProofAttached] = useState(false)
-  const [taskProofFile, setTaskProofFile] = useState<File | null>(null)
 
   const [tempCursor, setTempCursor] = useState(0)
   const [tempInputs, setTempInputs] = useState<Record<string, string>>({})
   const [tempSubmitting, setTempSubmitting] = useState<Record<string, boolean>>({})
   const [tempReading, setTempReading] = useState('')
-  const [tempProofFile, setTempProofFile] = useState<File | null>(null)
   const [tempHistory, setTempHistory] = useState<Array<{ item: string; value: number; valid: boolean }>>([])
 
   const [wasteItem, setWasteItem] = useState('Butter Chicken')
@@ -495,8 +473,6 @@ function App() {
         const backendTempCursor = resumeState.loggedTempItemIds.length % tempItems.length
 
         setOpeningCompleted(mergedOpeningCount)
-        setOpeningChecklistCompletionId(resumeState.openingCompletionId)
-        setActiveTempLogId(resumeState.activeTempLogId)
         setTempHistory(snapshot.tempHistory)
         setWasteEntries(snapshot.wasteEntries)
         setCriticalAlerts(snapshot.alerts)
@@ -567,7 +543,6 @@ function App() {
       window.clearTimeout(draftSaveTimerRef.current)
     }
 
-    setDraftSaveState('saving')
     draftSaveTimerRef.current = window.setTimeout(() => {
       writeLocalDraft(appUser.id, {
         openingCompleted,
@@ -591,6 +566,7 @@ function App() {
 
   useEffect(() => {
     if (!appUser) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraftConflict(null)
       return
     }
@@ -619,8 +595,22 @@ function App() {
     })
   }, [appUser, backendResumeBaseline, openingCompleted, taskDualInput.first, taskDualInput.second, taskInput, taskMultiInput, tempCursor, tempReading])
 
+  const loadAdminData = async () => {
+    if (!appUser) return
+    setAdminLoading(true)
+    try {
+      const rows = await fetchAdminDashboard(appUser.location_id)
+      setAdminRows(rows)
+    } catch {
+      // non-critical — leave empty
+    } finally {
+      setAdminLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (activeModule === 'admin' && appUser) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadAdminData()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -647,7 +637,6 @@ function App() {
     return { label: 'ATTENTION NEEDED', tone: 'attention', percent: 82 }
   }, [criticalAlerts.length, pendingChecklistCount])
 
-  const filteredTempHistory = tempHistoryFilter === 'All' ? tempHistory : tempHistory.filter((entry) => entry.item === tempHistoryFilter)
 
 
 
@@ -687,64 +676,6 @@ function App() {
     setTempInputs((prev) => ({ ...prev, [item.name]: '' }))
   }
 
-  const logTemp = async () => {
-    const current = tempItems[tempCursor]
-    if (!current || !appUser || !tempProofFile) {
-      return
-    }
-
-    const value = Number(tempReading)
-    if (Number.isNaN(value)) {
-      return
-    }
-
-    const tempItemId = tempItemIdMap.get(current.name)
-    if (!tempItemId) {
-      setSyncError(`Temp item missing in database: ${current.name}`)
-      return
-    }
-
-    const valid = (current.min === undefined || value >= current.min) && (current.max === undefined || value <= current.max)
-
-    try {
-      setIsSubmitting(true)
-      const tempLogId = await logTemperatureEntry({
-        locationId: appUser.location_id,
-        scheduledTime: nearestScheduledTime(),
-        tempItemId,
-        reading: value,
-        isValid: valid,
-        proofFile: tempProofFile,
-      })
-
-      setActiveTempLogId(tempLogId)
-
-      if (tempCursor + 1 >= tempItems.length) {
-        await setTempLogStatus(tempLogId, valid ? 'completed' : 'failed')
-      }
-
-      await evaluateAlerts(appUser.location_id)
-    } catch (error) {
-      setSyncError(error instanceof Error ? error.message : 'Failed to sync temperature log.')
-      return
-    } finally {
-      setIsSubmitting(false)
-    }
-
-    setTempHistory((prev) => [{ item: current.name, value, valid }, ...prev].slice(0, 8))
-    setBackendResumeBaseline((prev) => ({
-      ...prev,
-      tempLoggedCount: prev.tempLoggedCount + 1,
-    }))
-
-    if (!valid) {
-      setCriticalAlerts((prev) => [`Unsafe temperature: ${current.name} at ${value}F`, ...prev])
-    }
-
-    setTempReading('')
-    setTempProofFile(null)
-    setTempCursor((prev) => (prev + 1) % tempItems.length)
-  }
 
   const addWasteEntry = async () => {
     const qty = Number(wasteQty)
@@ -819,26 +750,11 @@ function App() {
       return g.items.every((i) => checkedItems[ckey].has(i.id))
     }).length
 
-  const loadAdminData = async () => {
-    if (!appUser) return
-    setAdminLoading(true)
-    try {
-      const rows = await fetchAdminDashboard(appUser.location_id)
-      setAdminRows(rows)
-    } catch {
-      // non-critical — leave empty
-    } finally {
-      setAdminLoading(false)
-    }
-  }
-
   const handleSignOut = async () => {
     try {
       setIsSubmitting(true)
       await signOut()
       setAppUser(null)
-      setOpeningChecklistCompletionId(null)
-      setActiveTempLogId(null)
       setTempItemIdMap(new Map())
       setReportRows([])
       setDraftSaveState('idle')
@@ -898,7 +814,7 @@ function App() {
   }
 
   const exportReportPdf = () => {
-    setDataTab('profit')
+    setDataTab('reports')
     window.setTimeout(() => window.print(), 80)
   }
 
@@ -935,8 +851,6 @@ function App() {
     setTaskInput('')
     setTaskDualInput({ first: '', second: '' })
     setTaskMultiInput({})
-    setTaskProofAttached(false)
-    setTaskProofFile(null)
 
     writeLocalDraft(appUser.id, {
       openingCompleted: backendResumeBaseline.openingCompleted,
@@ -1075,7 +989,7 @@ function App() {
               { key: 'waste', label: 'Waste', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> },
               { key: 'data', label: 'Reports', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
               { key: 'profile', label: 'Profile', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
-              ...(appUser.role === 'admin' || true ? [{ key: 'admin', label: 'Admin', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> }] : []),
+              ...(appUser.role === 'admin' ? [{ key: 'admin', label: 'Admin', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> }] : []),
             ] as Array<{ key: string; label: string; icon: React.ReactNode }>).map((item) => (
               <button
                 key={item.key}
